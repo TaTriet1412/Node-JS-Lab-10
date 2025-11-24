@@ -1,0 +1,201 @@
+<!--
+  Created by: Mai Van Manh
+  Date: 11/02/2020
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Danh sách người dùng</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css    ">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    .user {
+      display: flex;
+      align-items: center;
+      padding: 12px 24px;
+      cursor: pointer;
+    }
+
+    .user:nth-child(odd) {
+      background-color: #F4F5F7;
+    }
+
+    .user:hover {
+      background-color: #E6EFFF;
+      transition: 0.3s;
+    }
+
+    .avatar {
+      font-weight: bold;
+      font-size: 1.5rem;
+      background-color: deepskyblue;
+      width: 50px;
+      height: 50px;
+      margin-right: 16px;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white
+    }
+
+    .user-info {
+      height: 50px;
+      flex-grow: 1;
+    }
+
+    .user-name {
+      font-size: 1.1rem;
+    }
+
+    .user-info .online {
+      font-size: 0.9rem;
+      color: rgb(99, 99, 99)
+    }
+
+    .user .status {
+      width: 90px;
+      text-align: center;
+    }
+
+    .user:hover {
+      background-color: #E6EFFF;
+    }
+
+    .user:hover .avatar {
+      background-color: rgb(7, 142, 204);
+      transition: 0.3s;
+    }
+
+    .user:hover .user-name {
+      font-weight: 450;
+      transition: 0.3s;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-md-7">
+        <div class="rounded border mt-5 mb-3">
+          <h4 class="text-primary text-center my-5">Danh sách người dùng trực tuyến</h4>
+          <div style="padding: 0 24px; display: flex; justify-content: space-between; align-items: center;">
+            <p>Số người online: <strong class="badge badge-danger badge-pill">5</strong></p>
+            <a href="/logout" class="btn btn-danger btn-sm">Đăng xuất</a>
+          </div>
+          <div class="people">
+          </div>
+        </div>
+        <p class="small">Danh sách này cần được cập nhật tự động mỗi khi có người dùng đăng nhập hoặc đăng xuất/thoát.
+          Ngoài ra trạng thái của mỗi người dùng cũng cần được cập nhật mỗi khi họ tham gia hoặc rời một cuộc trò
+          chuyện.</p>
+        <p class="small">Để cho đơn giản, trang web chỉ cần hỗ trợ với mỗi người vào một thời điểm, không thể chat với người có trạng thái là <strong>đang bận</strong>.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+      const socket = io();
+      // Dữ liệu lấy từ Passport truyền qua EJS
+      const currentUser = {
+          email: "<%= user.emails[0].value %>",
+          name: "<%= user.displayName %>",
+          photo: "<%= user.photos[0].value %>"
+      };
+
+      // 1. Thông báo mình đã online
+      socket.emit('user_connected', currentUser);
+
+      // 2. Lắng nghe cập nhật danh sách người dùng
+      socket.on('update_user_list', (usersArray) => {
+          const listContainer = document.querySelector('.people');
+          const countElement = document.querySelector('.badge-danger'); // Số người online
+          
+          // Lọc bỏ bản thân mình khỏi danh sách hiển thị
+          const otherUsers = usersArray.filter(u => u.email !== currentUser.email);
+          
+          countElement.innerText = usersArray.length; // Tổng số online
+          listContainer.innerHTML = ''; // Xóa danh sách cũ
+
+          otherUsers.forEach(u => {
+              // Yêu cầu đề bài: Không chat được với người 'Busy'
+              let statusBadge = u.status === 'Available' 
+                  ? '<div class="badge badge-success badge-pill">Đang rảnh</div>'
+                  : '<div class="badge badge-warning badge-pill">Đang bận</div>';
+              
+              // Nếu bận thì không cho click, nếu rảnh thì chuyển trang chat
+              let clickAction = u.status === 'Available' 
+                  ? `onclick="window.location.href='/chat?partner=${u.email}'"` 
+                  : 'style="cursor: not-allowed; opacity: 0.6;"';
+
+              let html = `
+              <div class="user" ${clickAction}>
+                <div class="avatar"><img src="${u.avatar}" style="width:100%; border-radius:50%"></div>
+                <div class="user-info">
+                  <div class="user-name">${u.name}</div>
+                  <div class="online">${u.email}</div>
+                </div>
+                <div class="status">
+                  ${statusBadge}
+                </div>
+              </div>`;
+              listContainer.innerHTML += html;
+          });
+      });
+
+      // Lắng nghe sự kiện người dùng online
+      socket.on('user_online_notification', (userData) => {
+        // Chỉ hiển thị thông báo nếu không phải là chính mình
+        if (userData.email !== currentUser.email) {
+          // Tạo và hiển thị thông báo online
+          const onlineNotification = document.createElement('div');
+          onlineNotification.id = 'online-notification';
+          onlineNotification.className = 'alert alert-success d-inline position-fixed small';
+          onlineNotification.style.bottom = '20px';
+          onlineNotification.style.left = '20px';
+          onlineNotification.innerHTML = `<strong>${userData.name}</strong> vừa mới online`;
+          document.body.appendChild(onlineNotification);
+          
+          // Ẩn thông báo sau 3 giây
+          setTimeout(() => {
+            if (document.getElementById('online-notification')) {
+              document.getElementById('online-notification').remove();
+            }
+          }, 3000);
+        }
+      });
+
+      // Lắng nghe sự kiện người dùng offline
+      socket.on('user_offline_notification', (userData) => {
+        // Tạo và hiển thị thông báo offline
+        const offlineNotification = document.createElement('div');
+        offlineNotification.id = 'offline-notification';
+        offlineNotification.className = 'alert alert-danger d-inline position-fixed small';
+        offlineNotification.style.bottom = '20px';
+        offlineNotification.style.right = '20px';
+        offlineNotification.innerHTML = `<strong>${userData.name}</strong> đã thoát khỏi ứng dụng`;
+        document.body.appendChild(offlineNotification);
+        
+        // Ẩn thông báo sau 3 giây
+        setTimeout(() => {
+          if (document.getElementById('offline-notification')) {
+            document.getElementById('offline-notification').remove();
+          }
+        }, 3000);
+      });
+    </script>
+</body>
+
+</html>
