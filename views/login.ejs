@@ -111,6 +111,22 @@
           document.getElementById('error-message').style.display = 'block';
         }
       };
+
+      // Hàm lấy tham số từ URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const error = urlParams.get('error');
+
+      if (error === 'not_allowed') {
+          // Tìm cái alert đỏ có sẵn trong HTML của bạn và hiện nó lên
+          const alertBox = document.querySelector('.alert-danger');
+          if (alertBox) {
+              alertBox.style.display = 'block';
+              alertBox.innerHTML = `
+                  <button type="button" class="close" data-dismiss="alert">&times;</button>
+                  <strong>Lỗi!</strong> Chỉ chấp nhận email @student.tdtu.edu.vn
+              `;
+          }
+      }
     </script>
   </body>
 

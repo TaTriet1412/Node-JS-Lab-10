@@ -52,7 +52,7 @@ passport.use(new GoogleStrategy({
         return cb(null, profile);
     } else {
         // Trả về lỗi nếu không phải email sinh viên TDTU
-        return cb(new Error("Chỉ chấp nhận email sinh viên TDTU (@student.tdtu.edu.vn)!"));
+        return cb(null,false);
     }
   }
 ));
@@ -76,10 +76,11 @@ app.get('/auth/google',
   passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 app.get('/auth/google/callback', 
-  passport.authenticate('google', { failureRedirect: '/login' }),
-  function(req, res) {
-    res.redirect('/');
-  });
+  passport.authenticate('google', { 
+      failureRedirect: '/login?error=not_allowed', // Chuyển về login kèm mã lỗi
+      successRedirect: '/'
+  })
+);
 
 // Add error handling for Google authentication
 app.get('/auth/google/callback', (req, res, next) => {
