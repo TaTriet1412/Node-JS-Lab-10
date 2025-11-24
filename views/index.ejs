@@ -121,38 +121,85 @@
       // 2. Lắng nghe cập nhật danh sách người dùng
       socket.on('update_user_list', (usersArray) => {
           const listContainer = document.querySelector('.people');
-          const countElement = document.querySelector('.badge-danger'); // Số người online
+          const countElement = document.querySelector('.badge-danger');
           
-          // Lọc bỏ bản thân mình khỏi danh sách hiển thị
-          const otherUsers = usersArray.filter(u => u.email !== currentUser.email);
-          
-          countElement.innerText = usersArray.length; // Tổng số online
-          listContainer.innerHTML = ''; // Xóa danh sách cũ
+          // Sắp xếp để người đang nhắn cho mình lên đầu (UX tốt hơn)
+          usersArray.sort((a, b) => {
+              if (a.chattingWith === currentUser.email) return -1;
+              if (b.chattingWith === currentUser.email) return 1;
+              return 0;
+          });
 
-          otherUsers.forEach(u => {
-              // Yêu cầu đề bài: Không chat được với người 'Busy'
-              let statusBadge = u.status === 'Available' 
-                  ? '<div class="badge badge-success badge-pill">Đang rảnh</div>'
-                  : '<div class="badge badge-warning badge-pill">Đang bận</div>';
-              
-              // Nếu bận thì không cho click, nếu rảnh thì chuyển trang chat
-              let clickAction = u.status === 'Available' 
-                  ? `onclick="window.location.href='/chat?partner=${u.email}'"` 
-                  : 'style="cursor: not-allowed; opacity: 0.6;"';
+          countElement.innerText = usersArray.length; 
+          listContainer.innerHTML = ''; 
+
+          usersArray.forEach(u => {
+              // Logic xử lý trạng thái
+              let isMyPartner = (u.chattingWith === currentUser.email); // Họ đang chat với mình?
+              let isBusy = (u.status === 'Busy');
+
+              let statusBadge = '';
+              let clickAction = '';
+              let itemStyle = '';
+
+              if (u.email === currentUser.email) {
+                  // Là bản thân mình
+                  statusBadge = '<div class="badge badge-secondary badge-pill">Bạn</div>';
+                  clickAction = 'style="cursor: default;"';
+              } 
+              else if (isMyPartner) {
+                  // TRƯỜNG HỢP QUAN TRỌNG: Họ đang Busy nhưng là chat với mình
+                  // -> Cho phép bấm vào để trả lời
+                  statusBadge = '<div class="badge badge-primary badge-pill">Đang nhắn cho bạn</div>';
+                  clickAction = `onclick="window.location.href='/chat?partner=${u.email}'"`;
+                  itemStyle = 'background-color: #e3f2fd;'; // Highlight màu xanh nhạt
+              } 
+              else if (isBusy) {
+                  // Họ đang Busy với người khác -> Chặn
+                  statusBadge = '<div class="badge badge-warning badge-pill">Đang bận</div>';
+                  clickAction = 'style="cursor: not-allowed; opacity: 0.6;"';
+              } 
+              else {
+                  // Họ đang Rảnh -> Cho phép bấm
+                  statusBadge = '<div class="badge badge-success badge-pill">Đang rảnh</div>';
+                  clickAction = `onclick="window.location.href='/chat?partner=${u.email}'"`;
+              }
 
               let html = `
-              <div class="user" ${clickAction}>
-                <div class="avatar"><img src="${u.avatar}" style="width:100%; border-radius:50%"></div>
-                <div class="user-info">
+              <div class="user" ${clickAction} style="${itemStyle}">
+                  <div class="avatar"><img src="${u.avatar}" style="width:100%; border-radius:50%"></div>
+                  <div class="user-info">
                   <div class="user-name">${u.name}</div>
                   <div class="online">${u.email}</div>
-                </div>
-                <div class="status">
+                  </div>
+                  <div class="status">
                   ${statusBadge}
-                </div>
+                  </div>
               </div>`;
               listContainer.innerHTML += html;
           });
+      });
+
+      // THÊM: Hiển thị thông báo góc màn hình khi có người nhắn tới
+      socket.on('incoming_chat', (data) => {
+          // Tạo thông báo Toast (Góc dưới trái)
+          const toast = document.createElement('div');
+          toast.className = 'alert alert-info position-fixed small';
+          toast.style.bottom = '80px'; // Cao hơn thông báo online một chút
+          toast.style.left = '20px';
+          toast.style.zIndex = '1000';
+          toast.style.cursor = 'pointer';
+          toast.innerHTML = `<strong>${data.senderName}</strong> đang nhắn tin cho bạn. <br><u>Bấm để trả lời ngay</u>`;
+          
+          // Bấm vào thông báo thì chuyển trang luôn
+          toast.onclick = function() {
+              window.location.href = `/chat?partner=${data.senderEmail}`;
+          };
+
+          document.body.appendChild(toast);
+
+          // Tự tắt sau 5 giây
+          setTimeout(() => { toast.remove(); }, 5000);
       });
 
       // Lắng nghe sự kiện người dùng online

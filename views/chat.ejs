@@ -201,15 +201,25 @@
       <div class="col-md-9">
         <div class="rounded border mt-3 mb-3">
           <div class="user">
-            <div class="avatar">C</div>
-            <div class="user-info">
-              <div class="user-name">Phạm Công Chánh</div>
-              <div class="online">Vừa mới truy cập</div>
-            </div>
+            <% if (typeof partnerInfo !== 'undefined' && partnerInfo !== null) { %>
+              <div class="avatar"><img src="<%= partnerInfo.avatar %>" style="width:100%; border-radius:50%"></div>
+              <div class="user-info">
+                <div class="user-name"><%= partnerInfo.name %></div>
+                <div class="online">Vừa mới truy cập</div>
+              </div>
+            <% } else { %>
+              <div class="avatar">C</div>
+              <div class="user-info">
+                <div class="user-name">Phạm Công Chánh</div>
+                <div class="online">Vừa mới truy cập</div>
+              </div>
+            <% } %>
             <div class="actions">
               <i class="fas fa-phone-alt"></i>
               <i class="fas fa-video"></i>
               <i class="fas fa-search"></i>
+              <!-- Back button -->
+              <a href="/" class="btn btn-secondary btn-sm ml-2">Quay lại</a>
             </div>
           </div>
           <div class="conversation">
@@ -240,7 +250,11 @@
               <% } %>
           </div>
           <div class="message-input">
-            <div class="typing">Phạm Công Chánh đang soạn tin...</div>
+            <% if (typeof partnerInfo !== 'undefined' && partnerInfo !== null) { %>
+              <div class="typing" style="display: none;"><%= partnerInfo.name %> đang soạn tin...</div>
+            <% } else { %>
+              <div class="typing">Bạn bè đang soạn tin...</div>
+            <% } %>
             <input type="text" placeholder="Nhập tin nhắn">
             <a href="#">Gửi</a>
           </div>
@@ -278,6 +292,35 @@
           if (e.key === 'Enter') sendMessage();
       });
 
+      // Hiển thị indicator khi người kia đang soạn tin
+      socket.on('typing', (data) => {
+          if (data.sender === partnerEmail) {
+              const typingIndicator = document.querySelector('.typing');
+              typingIndicator.style.display = 'block';
+          }
+      });
+
+      // Ẩn indicator khi người kia ngừng soạn tin
+      socket.on('stop_typing', (data) => {
+          if (data.sender === partnerEmail) {
+              const typingIndicator = document.querySelector('.typing');
+              typingIndicator.style.display = 'none';
+          }
+      });
+
+      // Gửi sự kiện đang soạn tin
+      document.querySelector('.message-input input').addEventListener('input', (e) => {
+          socket.emit('typing', { sender: myEmail, receiver: partnerEmail });
+          
+          // Dừng soạn tin sau 1 giây không gõ
+          clearTimeout(typingTimeout);
+          typingTimeout = setTimeout(() => {
+              socket.emit('stop_typing', { sender: myEmail, receiver: partnerEmail });
+          }, 1000);
+      });
+
+      let typingTimeout;
+
       function sendMessage() {
           const input = document.querySelector('.message-input input');
           const content = input.value;
@@ -293,6 +336,10 @@
               content: content,
               type: 'text'
           });
+          
+          // Dừng soạn tin
+          socket.emit('stop_typing', { sender: myEmail, receiver: partnerEmail });
+          
           input.value = '';
           chatBox.scrollTop = chatBox.scrollHeight;
       }

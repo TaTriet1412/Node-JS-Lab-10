@@ -46,14 +46,11 @@ passport.use(new GoogleStrategy({
   function(accessToken, refreshToken, profile, cb) {
     // YÊU CẦU ĐỀ BÀI: Chỉ cho phép email sinh viên TDTU
     const email = profile.emails[0].value;
-    if (email.endsWith('@student.tdtu.edu.vn') || email.endsWith('@tdtu.edu.vn')) { // Mở rộng cho giảng viên nếu cần
+    if (email.endsWith('@student.tdtu.edu.vn')) {
         return cb(null, profile);
     } else {
-        // Nếu muốn test bằng gmail thường thì comment đoạn if trên lại
-        // return cb(new Error("Chỉ chấp nhận email sinh viên TDTU!"));
-        
-        // Để test dễ dàng, mình tạm chấp nhận mọi email, bạn nhớ sửa lại khi nộp bài:
-        return cb(null, profile);
+        // Trả về lỗi nếu không phải email sinh viên TDTU
+        return cb(new Error("Chỉ chấp nhận email sinh viên TDTU (@student.tdtu.edu.vn)!"));
     }
   }
 ));
@@ -82,6 +79,25 @@ app.get('/auth/google/callback',
     res.redirect('/');
   });
 
+// Add error handling for Google authentication
+app.get('/auth/google/callback', (req, res, next) => {
+  passport.authenticate('google', (err, user, info) => {
+    if (err) {
+      // Redirect to login page with error message
+      return res.redirect('/login?error=' + encodeURIComponent(err.message));
+    }
+    if (!user) {
+      return res.redirect('/login');
+    }
+    req.logIn(user, (err) => {
+      if (err) {
+        return next(err);
+      }
+      return res.redirect('/');
+    });
+  })(req, res, next);
+});
+
 app.get('/', isAuth, (req, res) => {
     res.render('index', { user: req.user });
 });
@@ -96,7 +112,22 @@ app.get('/chat', isAuth, async (req, res) => {
         ]
     }).sort({ timestamp: 1 });
 
-    res.render('chat', { user: req.user, partnerId: partnerId, history: history });
+    // Get partner info from online users if available
+    let partnerInfo = null;
+    if (onlineUsers[partnerId]) {
+        partnerInfo = {
+            name: onlineUsers[partnerId].name,
+            email: onlineUsers[partnerId].email,
+            avatar: onlineUsers[partnerId].avatar
+        };
+    }
+
+    res.render('chat', { 
+        user: req.user, 
+        partnerId: partnerId, 
+        history: history,
+        partnerInfo: partnerInfo
+    });
 });
 
 app.get('/logout', (req, res) => {
@@ -106,52 +137,83 @@ app.get('/logout', (req, res) => {
 });
 
 // --- 4. XỬ LÝ SOCKET.IO (REALTIME) ---
-let onlineUsers = {}; // Lưu danh sách user: { email: { socketId, name, avatar, status } }
+let onlineUsers = {}; // Lưu danh sách user
+let disconnectTimers = {}; // Lưu các bộ đếm thời gian chờ thoát
 
 io.on('connection', (socket) => {
     console.log('New connection:', socket.id);
 
-    // Khi user vừa vào trang chủ (login xong)
+    // --- Xử lý khi User Online (từ trang Index) ---
     socket.on('user_connected', (userData) => {
-        socket.email = userData.email; // Gán email vào socket để quản lý
+        socket.email = userData.email; 
+        
+        // 1. Nếu user này đang trong danh sách chờ xóa (do vừa reload/chuyển trang), thì HỦY xóa
+        if (disconnectTimers[userData.email]) {
+            clearTimeout(disconnectTimers[userData.email]);
+            delete disconnectTimers[userData.email];
+        }
+
+        // 2. Cập nhật thông tin và set trạng thái Available
         onlineUsers[userData.email] = {
             socketId: socket.id,
             name: userData.name,
             avatar: userData.photo,
             email: userData.email,
-            status: 'Available' // Mặc định là rảnh
+            status: 'Available',
+            chattingWith: null // Thêm thuộc tính để biết đang chat với ai
         };
-        // Gửi danh sách user mới cho TẤT CẢ mọi người
+
+        // 3. Gửi danh sách mới cho mọi người
         io.emit('update_user_list', Object.values(onlineUsers));
-        // Gửi thông báo người dùng mới online (trừ chính họ) chỉ khi có người khác trong phòng
-        if (Object.keys(onlineUsers).length > 1) {
-            socket.broadcast.emit('user_online_notification', {
-                name: userData.name,
-                email: userData.email
+        
+        // Chỉ thông báo "Vừa mới online" nếu đây là kết nối mới hoàn toàn (không phải do F5)
+        // (Logic này tùy chọn, nhưng để đơn giản ta cứ broadcast notification như cũ)
+        socket.broadcast.emit('user_online_notification', {
+            name: userData.name,
+            email: userData.email
+        });
+    });
+
+    // SỬA LẠI sự kiện join_chat
+    socket.on('join_chat', (data) => {
+        const { myEmail, partnerEmail } = data;
+        socket.email = myEmail;
+
+        // Hủy timer disconnect nếu có (code fix lỗi f5 trước đó)
+        if (disconnectTimers[myEmail]) {
+            clearTimeout(disconnectTimers[myEmail]);
+            delete disconnectTimers[myEmail];
+        }
+
+        if (onlineUsers[myEmail]) {
+            onlineUsers[myEmail].socketId = socket.id;
+            onlineUsers[myEmail].status = 'Busy';
+            onlineUsers[myEmail].chattingWith = partnerEmail; // <--- THÊM DÒNG NÀY: Lưu đang chat với ai
+        }
+
+        // Cập nhật danh sách cho mọi người
+        io.emit('update_user_list', Object.values(onlineUsers));
+
+        // (Tùy chọn) Gửi thông báo riêng cho người nhận để hiện popup
+        const partner = onlineUsers[partnerEmail];
+        if (partner) {
+            io.to(partner.socketId).emit('incoming_chat', { 
+                senderEmail: myEmail,
+                senderName: onlineUsers[myEmail].name 
             });
         }
     });
 
-    // Khi user bắt đầu chat -> Chuyển sang bận
-    socket.on('join_chat', (data) => {
-        const { myEmail, partnerEmail } = data;
-        if(onlineUsers[myEmail]) {
-            onlineUsers[myEmail].status = 'Busy';
-            // if(onlineUsers[partnerEmail]) onlineUsers[partnerEmail].status = 'Busy'; // Logic này tùy chọn, nếu muốn partner cũng bận
-            
-            io.emit('update_user_list', Object.values(onlineUsers));
-        }
-    });
-
-    // Rời chat -> Rảnh
+    // SỬA LẠI sự kiện leave_chat
     socket.on('leave_chat', (myEmail) => {
         if(onlineUsers[myEmail]) {
             onlineUsers[myEmail].status = 'Available';
+            onlineUsers[myEmail].chattingWith = null; // <--- THÊM DÒNG NÀY: Xóa người đang chat cùng
             io.emit('update_user_list', Object.values(onlineUsers));
         }
     });
 
-    // Gửi tin nhắn
+    // --- Xử lý Gửi tin nhắn ---
     socket.on('send_message', async (data) => {
         // Lưu DB
         const newMsg = new Message({
@@ -162,26 +224,48 @@ io.on('connection', (socket) => {
         });
         await newMsg.save();
 
-        // Gửi cho người nhận nếu họ online
         const receiver = onlineUsers[data.receiver];
         if (receiver) {
             io.to(receiver.socketId).emit('receive_message', data);
         }
     });
+    
+    // --- Xử lý Đang soạn tin ---
+    socket.on('typing', (data) => {
+       const receiver = onlineUsers[data.receiver];
+       if(receiver) io.to(receiver.socketId).emit('typing', data);
+    });
+    socket.on('stop_typing', (data) => {
+       const receiver = onlineUsers[data.receiver];
+       if(receiver) io.to(receiver.socketId).emit('stop_typing', data);
+    });
 
-    // Ngắt kết nối
+
+    // --- Xử lý Ngắt kết nối (QUAN TRỌNG NHẤT) ---
     socket.on('disconnect', () => {
-        if (socket.email && onlineUsers[socket.email]) {
-            const userData = onlineUsers[socket.email];
-            delete onlineUsers[socket.email];
-            io.emit('update_user_list', Object.values(onlineUsers));
-            // Gửi thông báo người dùng offline chỉ khi còn người khác trong phòng
-            if (Object.keys(onlineUsers).length > 0) {
+        const email = socket.email;
+        if (email && onlineUsers[email]) {
+            // THAY VỊ XÓA NGAY, TA CHỜ 3 GIÂY
+            disconnectTimers[email] = setTimeout(() => {
+                const userData = onlineUsers[email];
+                
+                // Xóa user
+                delete onlineUsers[email];
+                
+                // Xóa timer
+                delete disconnectTimers[email];
+
+                // Cập nhật danh sách
+                io.emit('update_user_list', Object.values(onlineUsers));
+                
+                // Gửi thông báo Offline
                 io.emit('user_offline_notification', {
                     name: userData.name,
                     email: userData.email
                 });
-            }
+                
+                console.log(`User ${email} disconnected permanently.`);
+            }, 3000); // Chờ 3000ms (3 giây)
         }
     });
 });
