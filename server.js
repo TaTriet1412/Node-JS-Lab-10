@@ -8,6 +8,7 @@ const session = require('express-session');
 const mongoose = require('mongoose');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = socketIo(server);
 
@@ -41,7 +42,8 @@ app.use(passport.session());
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "/auth/google/callback"
+    callbackURL: "/auth/google/callback",
+    proxy: true
   },
   function(accessToken, refreshToken, profile, cb) {
     // YÊU CẦU ĐỀ BÀI: Chỉ cho phép email sinh viên TDTU
